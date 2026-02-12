@@ -1,0 +1,37 @@
+name: "development_workflow"
+description: "Multi-agent software development pipeline for building features"
+version: "1.0"
+
+steps:
+  - id: "analyze"
+    name: "Requirements Analysis"
+    agent: "analyst"
+    model: "REASONING_MODEL"
+    input_source: "user_request"
+    output_key: "requirements"
+    description: "Break down user request into clear, structured requirements"
+    
+  - id: "design"
+    name: "System Design"
+    agent: "architect"
+    model: "REASONING_MODEL"
+    input_source: "requirements"
+    output_key: "architecture"
+    description: "Create system architecture and technical design based on requirements"
+    
+  - id: "implement"
+    name: "Implementation"
+    agent: "developer"
+    model: "CODING_MODEL"
+    input_source: "architecture"
+    output_key: "code"
+    description: "Write production-ready code following the architecture"
+    
+  - id: "review"
+    name: "Code Review"
+    agent: "reviewer"
+    model: "REASONING_MODEL"
+    input_source: "code"
+    context_keys: ["requirements", "architecture"]  # Reviewer sees original requirements too
+    output_key: "review"
+    description: "Review code for quality, security, and adherence to requirements"

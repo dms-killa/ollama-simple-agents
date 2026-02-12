@@ -1,0 +1,37 @@
+name: "content_creation_workflow"
+description: "Multi-agent workflow for creating blog content"
+version: "1.0"
+
+steps:
+  - id: "research"
+    name: "Topic Research"
+    agent: "analyst"
+    model: "REASONING_MODEL"
+    input_source: "user_request"
+    output_key: "research"
+    description: "Research the topic and identify key points to cover"
+    
+  - id: "outline"
+    name: "Content Outline"
+    agent: "architect"
+    model: "REASONING_MODEL"
+    input_source: "research"
+    output_key: "outline"
+    description: "Create a detailed outline for the blog post"
+    
+  - id: "write"
+    name: "Content Writing"
+    agent: "developer"
+    model: "CODING_MODEL"
+    input_source: "outline"
+    output_key: "content"
+    description: "Write the actual blog content based on the outline"
+    
+  - id: "edit"
+    name: "Content Editing"
+    agent: "reviewer"
+    model: "REASONING_MODEL"
+    input_source: "content"
+    context_keys: ["research", "outline"]
+    output_key: "edited_content"
+    description: "Review and improve the content for clarity and engagement"

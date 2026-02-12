@@ -1,0 +1,20 @@
+# Core dependencies
+requests>=2.31.0
+python-dotenv>=1.0.0
+pyyaml>=6.0.1
+
+# Vector Database Support (choose based on your needs)
+
+# ChromaDB - Recommended for local/development use
+chromadb>=0.4.22
+sentence-transformers>=2.2.2
+
+# Pinecone - For cloud-based vector storage (optional)
+# pinecone-client>=3.0.0
+
+# Qdrant - Alternative vector database (optional)
+# qdrant-client>=1.7.0
+
+# Additional utilities
+# numpy>=1.24.0  # Usually installed with chromadb
+# torch>=2.0.0   # Required for sentence-transformers

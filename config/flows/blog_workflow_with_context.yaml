@@ -1,0 +1,50 @@
+name: "blog_workflow_with_context"
+description: "Blog content creation workflow with vector database context injection"
+
+steps:
+  - id: "research"
+    name: "Topic Research with Context"
+    agent: "analyst"
+    model: "REASONING_MODEL"
+    input_source: "user_request"
+    output_key: "research"
+    # Vector context configuration
+    vector_context_enabled: true
+    vector_collection: "blog_knowledge"  # Which collection to query
+    vector_context_query: "background information about {user_request}"  # Custom query template
+    vector_top_k: 5  # Number of relevant chunks to retrieve
+    max_context_length: 3000  # Optional: limit context size
+
+  - id: "outline"
+    name: "Create Outline"
+    agent: "architect"
+    model: "REASONING_MODEL"
+    input_source: "research"
+    output_key: "outline"
+    context_keys:
+      - "user_request"
+    # Vector context can be enabled here too
+    vector_context_enabled: true
+    vector_collection: "blog_templates"
+    vector_context_query: "blog outline templates and structures"
+    vector_top_k: 3
+
+  - id: "draft"
+    name: "Write Draft"
+    agent: "developer"
+    model: "CODING_MODEL"
+    input_source: "outline"
+    output_key: "draft"
+    context_keys:
+      - "research"
+      - "user_request"
+
+  - id: "review"
+    name: "Review and Polish"
+    agent: "reviewer"
+    model: "REASONING_MODEL"
+    input_source: "draft"
+    output_key: "final_content"
+    context_keys:
+      - "outline"
+      - "user_request"

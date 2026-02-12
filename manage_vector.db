@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""
+Vector Database Management Utility
+
+This script helps you manage your vector database collections:
+- Add documents from files or directories
+- List collections
+- Query collections
+- Delete collections
+"""
+
+import argparse
+import sys
+from pathlib import Path
+from typing import List, Optional
+import json
+
+from core.context_manager import ContextManager
+
+
+def read_documents_from_file(filepath: Path) -> List[str]:
+    """Read documents from a file. Supports txt, md, json."""
+    if filepath.suffix == '.json':
+        with open(filepath, 'r') as f:
+            data = json.load(f)
+            # Assume JSON is either a list of strings or list of dicts with 'content' key
+            if isinstance(data, list):
+                if data and isinstance(data[0], dict):
+                    return [item.get('content', '') for item in data]
+                return data
+    else:
+        # For .txt or .md files, split by double newlines as document separator
+        with open(filepath, 'r') as f:
+            content = f.read()
+            docs = [doc.strip() for doc in content.split('\n\n') if doc.strip()]
+            return docs
+    
+    return []
+
+
+def read_documents_from_directory(dirpath: Path, pattern: str = "*.txt") -> List[str]:
+    """Read all documents from a directory matching pattern."""
+    documents = []
+    for filepath in dirpath.glob(pattern):
+        if filepath.is_file():
+            docs = read_documents_from_file(filepath)
+            documents.extend(docs)
+    return documents
+
+
+def add_documents_command(args):
+    """Add documents to a collection."""
+    context_manager = ContextManager(db_type=args.db_type)
+    
+    documents = []
+    
+    # Read from file or directory
+    source_path = Path(args.source)
+    if source_path.is_file():
+        documents = read_documents_from_file(source_path)
+    elif source_path.is_dir():
+        pattern = args.pattern or "*.txt"
+        documents = read_documents_from_directory(source_path, pattern)
+    else:
+        print(f"Error: {args.source} is not a valid file or directory")
+        return 1
+    
+    if not documents:
+        print(f"No documents found in {args.source}")
+        return 1
+    
+    print(f"Found {len(documents)} documents")
+    
+    # Add to collection
+    try:
+        context_manager.add_documents(
+            collection_name=args.collection,
+            documents=documents
+        )
+        print(f"✓ Successfully added {len(documents)} documents to collection '{args.collection}'")
+        return 0
+    except Exception as e:
+        print(f"Error adding documents: {e}")
+        return 1
+
+
+def list_collections_command(args):
+    """List all collections."""
+    context_manager = ContextManager(db_type=args.db_type)
+    
+    try:
+        collections = context_manager.list_collections()
+        if collections:
+            print(f"\nAvailable collections ({len(collections)}):")
+            for collection in collections:
+                print(f"  - {collection}")
+        else:
+            print("No collections found")
+        return 0
+    except Exception as e:
+        print(f"Error listing collections: {e}")
+        return 1
+
+
+def query_command(args):
+    """Query a collection."""
+    context_manager = ContextManager(db_type=args.db_type)
+    
+    try:
+        results = context_manager.query_context(
+            query=args.query,
+            collection_name=args.collection,
+            top_k=args.top_k
+        )
+        
+        if results:
+            print(f"\nFound {len(results)} results:\n")
+            for i, result in enumerate(results, 1):
+                print(f"--- Result {i} ---")
+                if result.get('metadata'):
+                    print(f"Metadata: {result['metadata']}")
+                if result.get('distance') is not None:
+                    print(f"Distance: {result['distance']:.4f}")
+                print(f"\nContent:\n{result['content']}\n")
+        else:
+            print("No results found")
+        
+        return 0
+    except Exception as e:
+        print(f"Error querying collection: {e}")
+        return 1
+
+
+def delete_collection_command(args):
+    """Delete a collection."""
+    context_manager = ContextManager(db_type=args.db_type)
+    
+    # Confirm deletion
+    if not args.yes:
+        response = input(f"Are you sure you want to delete collection '{args.collection}'? (y/N): ")
+        if response.lower() != 'y':
+            print("Cancelled")
+            return 0
+    
+    try:
+        success = context_manager.delete_collection(args.collection)
+        if success:
+            print(f"✓ Collection '{args.collection}' deleted")
+            return 0
+        else:
+            print(f"Failed to delete collection '{args.collection}'")
+            return 1
+    except Exception as e:
+        print(f"Error deleting collection: {e}")
+        return 1
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Manage vector database collections for the agent system"
+    )
+    parser.add_argument(
+        '--db-type',
+        default='chroma',
+        choices=['chroma', 'pinecone', 'qdrant'],
+        help='Vector database type (default: chroma)'
+    )
+    
+    subparsers = parser.add_subparsers(dest='command', help='Command to execute')
+    
+    # Add documents command
+    add_parser = subparsers.add_parser('add', help='Add documents to a collection')
+    add_parser.add_argument('source', help='File or directory containing documents')
+    add_parser.add_argument('--collection', default='default', help='Collection name')
+    add_parser.add_argument('--pattern', help='File pattern for directory (e.g., *.md)')
+    
+    # List collections command
+    list_parser = subparsers.add_parser('list', help='List all collections')
+    
+    # Query command
+    query_parser = subparsers.add_parser('query', help='Query a collection')
+    query_parser.add_argument('query', help='Search query')
+    query_parser.add_argument('--collection', default='default', help='Collection name')
+    query_parser.add_argument('--top-k', type=int, default=5, help='Number of results')
+    
+    # Delete collection command
+    delete_parser = subparsers.add_parser('delete', help='Delete a collection')
+    delete_parser.add_argument('collection', help='Collection name to delete')
+    delete_parser.add_argument('-y', '--yes', action='store_true', help='Skip confirmation')
+    
+    args = parser.parse_args()
+    
+    if not args.command:
+        parser.print_help()
+        return 1
+    
+    # Execute command
+    if args.command == 'add':
+        return add_documents_command(args)
+    elif args.command == 'list':
+        return list_collections_command(args)
+    elif args.command == 'query':
+        return query_command(args)
+    elif args.command == 'delete':
+        return delete_collection_command(args)
+    
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

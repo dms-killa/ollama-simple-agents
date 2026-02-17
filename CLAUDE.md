@@ -30,6 +30,12 @@ The system follows a pipeline architecture with these key components:
 4. Each agent uses its specific system prompt from the `prompts/` directory
 5. State is passed between steps via a shared dictionary
 
+## Available Workflows
+
+The system includes two built-in workflows:
+- `dev_workflow.yaml`: Software development pipeline (analysis → design → implementation → review)
+- `blog_workflow.yaml`: Content creation workflow (research → outline → writing → editing)
+
 ## Development Commands
 
 - **Run a workflow**: `python main.py --flow dev_workflow --request "Build a Python API for task management"`

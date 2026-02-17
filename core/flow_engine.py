@@ -1,3 +1,4 @@
+import os
 import yaml
 import logging
 from pathlib import Path
@@ -191,20 +192,45 @@ class FlowEngine:
                 raise
             return None
 
+    # -- Template resolution --------------------------------------------------
+
+    def _resolve(self, value: str) -> str:
+        """Resolve {key} placeholders in a string using current state."""
+        if not isinstance(value, str):
+            return value
+        try:
+            return value.format(**self.state)
+        except (KeyError, ValueError, IndexError):
+            return value
+
+    # -- Step dispatcher -------------------------------------------------------
+
     def execute_step(self, step: Dict[str, Any]) -> str:
         """
         Execute a single workflow step.
 
-        Args:
-            step: Step configuration from the workflow YAML
-
-        Returns:
-            The agent's response text
-
-        Raises:
-            Various exceptions from OllamaClient, file operations, etc.
+        Dispatches to the appropriate handler based on the step's ``type``
+        field.  Steps without an explicit type default to ``agent`` for
+        backward compatibility.
         """
-        agent_name = step['agent']
+        step_type = step.get('type', 'agent')
+
+        if step_type == 'file_read':
+            return self._execute_file_read(step)
+        elif step_type == 'file_write':
+            return self._execute_file_write(step)
+        elif step_type == 'status_update':
+            return self._execute_status_update(step)
+        elif step_type == 'vector_embed':
+            return self._execute_vector_embed(step)
+        else:
+            return self._execute_agent_step(step)
+
+    # -- Agent step (original behaviour) ---------------------------------------
+
+    def _execute_agent_step(self, step: Dict[str, Any]) -> str:
+        """Execute an LLM agent step (the default step type)."""
+        agent_name = self._resolve(step['agent'])
         model = step['model']
         input_source = step.get('input_source', 'user_request')
         output_key = step['output_key']
@@ -223,7 +249,7 @@ class FlowEngine:
         if context_keys:
             context_parts = []
             for key in context_keys:
-                if key in self.state:
+                if key in self.state and self.state[key]:
                     context_parts.append(f"## {key.replace('_', ' ').title()}\n{self.state[key]}")
 
             if context_parts:
@@ -266,11 +292,125 @@ class FlowEngine:
 
         return response
 
+    # -- File read step --------------------------------------------------------
+
+    def _execute_file_read(self, step: Dict[str, Any]) -> str:
+        """Read a file and store its content in state."""
+        file_path = Path(self._resolve(step['file_path']))
+        output_key = step['output_key']
+
+        if file_path.exists():
+            content = file_path.read_text()
+            logger.info(f"Read file: {file_path}")
+        else:
+            content = step.get('default', '')
+            logger.info(f"File not found, using default: {file_path}")
+
+        self.state[output_key] = content
+        return content
+
+    # -- File write step -------------------------------------------------------
+
+    def _execute_file_write(self, step: Dict[str, Any]) -> str:
+        """Write content from state to a file."""
+        file_path = Path(self._resolve(step['file_path']))
+        input_source = step['input_source']
+        content = self.state.get(input_source, '')
+
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(content)
+        logger.info(f"Wrote file: {file_path}")
+
+        return content
+
+    # -- Status update step ----------------------------------------------------
+
+    def _execute_status_update(self, step: Dict[str, Any]) -> str:
+        """Create / update a project STATUS.md from flow state (no LLM)."""
+        project_dir = Path(self._resolve(step['project_dir']))
+        project_dir.mkdir(parents=True, exist_ok=True)
+        status_path = project_dir / 'STATUS.md'
+
+        # Preserve key terminology from existing STATUS.md
+        existing_terminology = ''
+        if status_path.exists():
+            existing = status_path.read_text()
+            if '## Key Terminology' in existing:
+                after = existing.split('## Key Terminology', 1)[1]
+                term_lines = []
+                for line in after.split('\n')[1:]:
+                    if line.startswith('## '):
+                        break
+                    term_lines.append(line)
+                existing_terminology = '\n'.join(term_lines).strip()
+
+        # Collect files in project dir (excluding STATUS.md itself)
+        files = sorted(
+            f.name for f in project_dir.iterdir()
+            if f.is_file() and f.name != 'STATUS.md'
+        ) if project_dir.exists() else []
+        file_list = '\n'.join(f'- {f}' for f in files) if files else '(none yet)'
+
+        phase = self.state.get('phase', 'unknown')
+        focus = self.state.get('user_request', '')
+        model = os.getenv('REASONING_MODEL', 'default')
+        embedding_model = os.getenv('EMBEDDING_MODEL', 'all-MiniLM-L6-v2')
+
+        status_content = (
+            f"---\n"
+            f"model: {model}\n"
+            f"embedding_model: {embedding_model}\n"
+            f"---\n\n"
+            f"## Phase\n{phase}\n\n"
+            f"## Files\n{file_list}\n\n"
+            f"## Current Focus\n{focus}\n\n"
+            f"## Key Terminology\n{existing_terminology}\n"
+        )
+
+        status_path.write_text(status_content)
+        self.state['status'] = status_content
+        logger.info(f"Updated STATUS.md in {project_dir}")
+        return status_content
+
+    # -- Vector embed step -----------------------------------------------------
+
+    def _execute_vector_embed(self, step: Dict[str, Any]) -> str:
+        """Embed content into a vector collection for later retrieval."""
+        if not self.vector_context_enabled or not self.context_manager:
+            logger.info("Vector context disabled, skipping embed")
+            return ''
+
+        collection_name = self._resolve(step.get('vector_collection', 'default'))
+        input_source = step['input_source']
+        content = self.state.get(input_source, '')
+
+        if not content:
+            logger.info("No content to embed")
+            return ''
+
+        try:
+            collection = self.context_manager.get_or_create_collection(collection_name)
+            doc_id = f"{self.state.get('project', 'unknown')}_{self.state.get('phase', 'unknown')}"
+            collection.upsert(
+                documents=[content],
+                ids=[doc_id],
+                metadatas=[{
+                    "project": self.state.get('project', ''),
+                    "phase": self.state.get('phase', ''),
+                }],
+            )
+            logger.info(f"Embedded content into collection '{collection_name}'")
+        except Exception as e:
+            logger.warning(f"Failed to embed content: {e}")
+
+        return content
+
     def run_flow(
-        self, 
-        flow_name: str, 
+        self,
+        flow_name: str,
         user_request: str,
-        verbose: bool = True
+        verbose: bool = True,
+        params: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Execute a complete workflow.
@@ -279,6 +419,9 @@ class FlowEngine:
             flow_name: Name of the flow YAML file (without extension)
             user_request: The initial user request/prompt
             verbose: Whether to print intermediate results
+            params: Optional extra parameters (e.g. project, phase) merged
+                    into the initial state so that YAML templates can
+                    reference them as ``{project}`` / ``{phase}``.
 
         Returns:
             Final state dictionary containing all step outputs
@@ -289,6 +432,8 @@ class FlowEngine:
         """
         # Reset state
         self.state = {'user_request': user_request}
+        if params:
+            self.state.update(params)
 
         # Load flow configuration
         flow_config = self.load_flow(flow_name)
@@ -304,8 +449,9 @@ class FlowEngine:
                 result = self.execute_step(step)
 
                 if verbose:
+                    output_label = step.get('output_key', step.get('id', 'step'))
                     logger.info(f"\n{'-'*40}")
-                    logger.info(f"Output ({step['output_key']}):")
+                    logger.info(f"Output ({output_label}):")
                     logger.info(f"{'-'*40}")
                     # Truncate long outputs for display
                     preview = result[:500] + "..." if len(result) > 500 else result

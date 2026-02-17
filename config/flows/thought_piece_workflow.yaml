@@ -1,0 +1,39 @@
+name: "thought_piece_workflow"
+description: "Iterative long-form writing workflow with project awareness"
+
+steps:
+  - id: "read_status"
+    name: "Read Project Status"
+    type: "file_read"
+    file_path: "projects/{project}/STATUS.md"
+    output_key: "status_context"
+    default: ""
+
+  - id: "write"
+    name: "Execute Writing Phase"
+    agent: "{phase}_agent"
+    model: "REASONING_MODEL"
+    input_source: "user_request"
+    context_keys: ["status_context"]
+    output_key: "draft"
+    vector_context_enabled: true
+    vector_collection: "{project}_research"
+    vector_context_query: "{user_request}"
+    vector_top_k: 5
+
+  - id: "save_output"
+    name: "Save Phase Output"
+    type: "file_write"
+    file_path: "projects/{project}/{phase}.md"
+    input_source: "draft"
+
+  - id: "update_status"
+    name: "Update Project Status"
+    type: "status_update"
+    project_dir: "projects/{project}"
+
+  - id: "embed_content"
+    name: "Embed Content for Future Retrieval"
+    type: "vector_embed"
+    vector_collection: "{project}_research"
+    input_source: "draft"

@@ -70,6 +70,18 @@ Examples:
         help='List all available Ollama models'
     )
     
+    # Project-aware workflow options
+    parser.add_argument(
+        '--project',
+        type=str,
+        help='Project name for project-aware workflows (e.g. my-essay)'
+    )
+    parser.add_argument(
+        '--phase',
+        type=str,
+        help='Writing phase for project-aware workflows (e.g. vision, outline, section, revise)'
+    )
+
     # Vector context options
     parser.add_argument(
         '--no-vector-context',
@@ -134,11 +146,19 @@ Examples:
     # Execute workflow
     try:
         verbose = not args.quiet
-        
+
+        # Build extra parameters for template resolution
+        params = {}
+        if args.project:
+            params['project'] = args.project
+        if args.phase:
+            params['phase'] = args.phase
+
         state = engine.run_flow(
             flow_name=args.flow,
             user_request=args.request,
-            verbose=verbose
+            verbose=verbose,
+            params=params,
         )
         
         # Determine final output key (usually from last step)

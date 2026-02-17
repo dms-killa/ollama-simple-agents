@@ -18,6 +18,8 @@ The system follows a pipeline architecture with these key components:
 - **prompts/**: System prompts for each agent role (analyst, architect, developer, reviewer)
 - **config/flows/**: YAML workflow definitions that specify the sequence of agent steps
 
+Additionally, the system now supports optional **vector context injection** for steps that declare vector retrieval parameters. When a workflow or individual step specifies context keys such as `vector_top_k` or `vector_max_context_length`, the engine will query the configured vector store (Chroma, Pinecone, or Qdrant) and prepend relevant context to the agent prompt.
+
 ## How It Works
 
 1. Users define workflows in YAML files in `config/flows/`
@@ -26,9 +28,10 @@ The system follows a pipeline architecture with these key components:
    - A model alias to use (resolved from environment variables)
    - Input source (from previous steps or user request)
    - Output key for storing results
-3. The FlowEngine loads the workflow and executes each step sequentially
-4. Each agent uses its specific system prompt from the `prompts/` directory
-5. State is passed between steps via a shared dictionary
+   - Optional vector context parameters (`vector_top_k`, `vector_max_context_length`)
+3. The FlowEngine loads the workflow and executes each step sequentially, injecting context where requested.
+4. Each agent uses its specific system prompt from the `prompts/` directory.
+5. State is passed between steps via a shared dictionary.
 
 ## Available Workflows
 
@@ -43,13 +46,17 @@ The system includes two built-in workflows:
 - **List available Ollama models**: `python main.py --list-models`
 - **Run with quiet mode**: `python main.py --flow dev_workflow --request "Build a calculator" --quiet`
 - **Save output to file**: `python main.py --flow dev_workflow --request "Create a login system" --output results.md`
+- **Disable vector context**: `python main.py --flow blog_workflow_with_context --request "Quick post" --no-vector-context`
+- **Set vector database**: `python main.py --vector-db-type pinecone`
 
 ## Configuration
 
 The system uses environment variables defined in `.env`:
 - `OLLAMA_HOST`: URL of the Ollama server (default: `http://localhost:11434`)
-- Model mappings using `ALIAS_MODEL` format (e.g., `REASONING_MODEL=llama3.1:8b`)
+- `OLLAMA_MODEL_MAP`: Mapping of model aliases to Ollama model names (e.g., `REASONING_MODEL=llama3.1:8b`)
 - `REQUEST_TIMEOUT`: Timeout for API requests (default: 120 seconds)
+- `CHROMA_PERSIST_DIR`: Local directory for persisting Chroma embeddings (default: `./data/chroma_db`)
+- `PINECONE_API_KEY`: API key for Pinecone if using that backend, etc.
 
 ## Extending the System
 
@@ -59,7 +66,7 @@ Adding new agents:
 
 Adding new workflows:
 1. Create a new YAML file in `config/flows/`
-2. Define steps with agent, model, input/output mappings
+2. Define steps with agent, model, input/output mappings, and optional vector context parameters
 
 ## Key Files
 

@@ -1,0 +1,28 @@
+name: "email_drafter"
+description: "Professional email drafting assistant with tone review"
+
+steps:
+  - id: "analyze_intent"
+    name: "Analyze Email Context"
+    agent: "analyst"
+    model: "REASONING_MODEL"
+    input_source: "user_request"
+    output_key: "email_context"
+
+  - id: "draft_content"
+    name: "Draft Email"
+    agent: "developer"
+    model: "CODING_MODEL"
+    input_source: "email_context"
+    output_key: "email_draft"
+    context_keys:
+      - "user_request"
+
+  - id: "review_tone"
+    name: "Review Tone and Style"
+    agent: "reviewer"
+    model: "REASONING_MODEL"
+    input_source: "email_draft"
+    output_key: "final_email"
+    context_keys:
+      - "user_request"

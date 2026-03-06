@@ -1,0 +1,28 @@
+name: "debug_assistant"
+description: "Debug code errors and generate fixes"
+
+steps:
+  - id: "analyze_error"
+    name: "Error Analysis"
+    agent: "analyst"
+    model: "REASONING_MODEL"
+    input_source: "user_request"
+    output_key: "error_analysis"
+
+  - id: "generate_fix"
+    name: "Fix Solution"
+    agent: "developer"
+    model: "CODING_MODEL"
+    input_source: "error_analysis"
+    output_key: "fix_code"
+    context_keys:
+      - "user_request"
+
+  - id: "verify_fix"
+    name: "Code Review"
+    agent: "reviewer"
+    model: "REASONING_MODEL"
+    input_source: "fix_code"
+    output_key: "verified_solution"
+    context_keys:
+      - "error_analysis"

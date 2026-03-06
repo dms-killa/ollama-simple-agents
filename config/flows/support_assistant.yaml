@@ -1,0 +1,30 @@
+name: "support_assistant"
+description: "Customer support Q&A with knowledge retrieval"
+
+steps:
+  - id: "retrieive_knowledge"
+    name: "Retrieve Knowledge"
+    agent: "analyst"
+    model: "REASONING_MODEL"
+    input_source: "user_request"
+    output_key: "support_context"
+    vector_context_enabled: true
+    vector_collection: "support_kb"
+    vector_context_query: "answer to customer question about {user_request}"
+    vector_top_k: 5
+
+  - id: "draft_answer"
+    name: "Draft Answer"
+    agent: "developer"
+    model: "CODING_MODEL"
+    input_source: "support_context"
+    output_key: "answer_draft"
+    context_keys:
+      - "user_request"
+
+  - id: "review_tone"
+    name: "Review Tone"
+    agent: "reviewer"
+    model: "REASONING_MODEL"
+    input_source: "answer_draft"
+    output_key: "final_answer"

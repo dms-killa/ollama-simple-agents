@@ -1,0 +1,35 @@
+name: "research_assistant"
+description: "Research paper summarization and analysis assistant"
+
+steps:
+  - id: "extract_concepts"
+    name: "Extract Key Concepts"
+    agent: "analyst"
+    model: "REASONING_MODEL"
+    input_source: "user_request"
+    output_key: "key_concepts"
+
+  - id: "summarize_paper"
+    name: "Create Summary"
+    agent: "developer"
+    model: "CODING_MODEL"
+    input_source: "key_concepts"
+    output_key: "paper_summary"
+    context_keys:
+      - "user_request"
+
+  - id: "analyze_methodology"
+    name: "Methodology Analysis"
+    agent: "reviewer"
+    model: "REASONING_MODEL"
+    input_source: "paper_summary"
+    output_key: "methodology_notes"
+    context_keys:
+      - "key_concepts"
+
+  - id: "generate_questions"
+    name: "Generate Discussion Questions"
+    agent: "developer"
+    model: "CODING_MODEL"
+    input_source: "methodology_notes"
+    output_key: "discussion_questions"

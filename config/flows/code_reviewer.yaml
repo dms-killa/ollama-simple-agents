@@ -1,0 +1,37 @@
+name: "code_reviewer"
+description: "Automated code review workflow - analyzes, reviews, and suggests improvements"
+
+steps:
+  - id: "parse_code"
+    name: "Parse Code"
+    agent: "analyst"
+    model: "REASONING_MODEL"
+    input_source: "user_request"
+    output_key: "code_analysis"
+
+  - id: "identify_issues"
+    name: "Find Issues"
+    agent: "reviewer"
+    model: "REASONING_MODEL"
+    input_source: "code_analysis"
+    output_key: "issues_found"
+    context_keys:
+      - "user_request"
+
+  - id: "generate_fixes"
+    name: "Suggest Fixes"
+    agent: "developer"
+    model: "CODING_MODEL"
+    input_source: "issues_found"
+    output_key: "fix_suggestions"
+    context_keys:
+      - "code_analysis"
+
+  - id: "final_review"
+    name: "Final Review"
+    agent: "reviewer"
+    model: "REASONING_MODEL"
+    input_source: "fix_suggestions"
+    output_key: "review_complete"
+    context_keys:
+      - "issues_found"

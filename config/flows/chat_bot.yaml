@@ -1,0 +1,32 @@
+name: "chat_assistant"
+description: "Conversational chat assistant for general queries"
+
+steps:
+  - id: "analyze_query"
+    name: "Analyze Intent"
+    agent: "analyst"
+    model: "REASONING_MODEL"
+    input_source: "user_request"
+    output_key: "intent_analysis"
+    vector_context_enabled: true
+    vector_collection: "chat_knowledge"
+    vector_context_query: "background information about {user_request}"
+
+  - id: "generate_response"
+    name: "Generate Response"
+    agent: "developer"
+    model: "CODING_MODEL"
+    input_source: "intent_analysis"
+    output_key: "response"
+    context_keys:
+      - "user_request"
+      - "intent_analysis"
+
+  - id: "polish_tone"
+    name: "Review Tone"
+    agent: "reviewer"
+    model: "REASONING_MODEL"
+    input_source: "response"
+    output_key: "final_response"
+    context_keys:
+      - "user_request"

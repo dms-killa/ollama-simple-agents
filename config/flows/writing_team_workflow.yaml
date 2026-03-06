@@ -1,0 +1,47 @@
+name: "writing_team_workflow"
+description: "Full writing team pipeline: research, draft, edit, fact-check, and de-slop"
+version: "1.0"
+
+steps:
+  - id: "research"
+    name: "Deep Research"
+    agent: "researcher"
+    model: "REASONING_MODEL"
+    input_source: "user_request"
+    output_key: "research_brief"
+    description: "Investigate the topic and produce a structured research brief"
+
+  - id: "draft"
+    name: "First Draft"
+    agent: "drafter"
+    model: "REASONING_MODEL"
+    input_source: "research_brief"
+    output_key: "first_draft"
+    context_keys: ["user_request"]
+    description: "Turn the research brief into a complete first draft"
+
+  - id: "edit"
+    name: "Structural Edit"
+    agent: "editor"
+    model: "REASONING_MODEL"
+    input_source: "first_draft"
+    output_key: "edited_draft"
+    context_keys: ["research_brief"]
+    description: "Improve structure, clarity, and coherence"
+
+  - id: "fact_check"
+    name: "Fact Check"
+    agent: "fact_checker"
+    model: "REASONING_MODEL"
+    input_source: "edited_draft"
+    output_key: "checked_draft"
+    context_keys: ["research_brief"]
+    description: "Verify claims against the research brief and flag unsupported assertions"
+
+  - id: "de_slop"
+    name: "De-Slop Pass"
+    agent: "de_slopper"
+    model: "REASONING_MODEL"
+    input_source: "checked_draft"
+    output_key: "final_draft"
+    description: "Strip AI-generated filler, clichés, hedging, and corpspeak"

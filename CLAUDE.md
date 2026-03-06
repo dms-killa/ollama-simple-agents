@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a modular, extensible multi-agent workflow system that uses Ollama for local LLM execution. The system allows users to define multi-step workflows using YAML configuration files, where each step is executed by a specialized agent with a specific role and prompt.
+This is a modular, extensible multi-agent workflow system that uses Ollama for local LLM execution. The system allows users to define multi-step workflows using YAML configuration files, where each step is executed by a specialized agent with a specific role and prompt. It supports optional vector database context injection via ChromaDB (with Pinecone and Qdrant stubs).
 
 ## Architecture
 
@@ -14,15 +14,20 @@ The system follows a pipeline architecture with these key components:
 - **core/**: Core system components
   - `flow_engine.py`: Loads and executes workflow configurations defined in YAML files
   - `ollama_client.py`: Handles communication with Ollama API for LLM interactions
-  - `context_manager.py`: Vector database integration (Chroma, Pinecone, Qdrant)
-  - `context_strategy.py`: Helpers for deciding when/how to retrieve vector context
-- **agents/**: Agent implementations (currently only base.py for agent interface)
-- **prompts/**: System prompts for each agent role (analyst, architect, developer, reviewer, vision_agent, outline_agent, section_agent, revise_agent)
+  - `context_manager.py`: Vector database integration (Chroma fully implemented; Pinecone and Qdrant stubs)
+  - `context_strategy.py`: Helpers for deciding when/how to retrieve vector context (note: `ContextStrategy` is also duplicated inside `context_manager.py`)
+- **agents/**: Agent implementations (currently only `base.py` with abstract interface; agents are defined by prompt files, not classes)
+- **prompts/**: System prompts for each agent role
+  - Development agents: `analyst`, `architect`, `developer`, `reviewer`
+  - Writing agents (thought piece): `vision_agent`, `outline_agent`, `section_agent`, `revise_agent`
+  - Writing team agents: `researcher`, `drafter`, `editor`, `fact_checker`, `de_slopper`
 - **config/flows/**: YAML workflow definitions that specify the sequence of agent steps
-- **projects/**: Project directories for project-aware workflows (created at runtime)
+- **projects/**: Project directories for project-aware workflows (created at runtime, not checked into git)
 - **tests/**: Pytest suite covering step types and workflow plumbing
+- **setup_example_collections.py**: Script to populate example ChromaDB collections for testing
+- **quick_start.sh**: Automated setup script (creates `.env`, installs deps, creates directories)
 
-Additionally, the system supports optional **vector context injection** for steps that declare vector retrieval parameters. When a workflow or individual step specifies context keys such as `vector_top_k` or `vector_max_context_length`, the engine will query the configured vector store (Chroma, Pinecone, or Qdrant) and prepend relevant context to the agent prompt.
+Additionally, the system supports optional **vector context injection** for steps that declare vector retrieval parameters. When a workflow or individual step specifies context keys such as `vector_top_k` or `vector_max_context_length`, the engine will query the configured vector store and prepend relevant context to the agent prompt.
 
 ## Step Types
 
@@ -63,33 +68,38 @@ The `thought_piece_workflow` uses `--project` and `--phase` CLI params to drive 
 - `blog_workflow.yaml`: Content creation workflow (research → outline → writing → editing)
 - `blog_workflow_with_context.yaml`: Blog workflow enhanced with vector context injection
 - `thought_piece_workflow.yaml`: Iterative long-form writing (read status → write phase → save output → update status → embed for retrieval)
+- `writing_team_workflow.yaml`: Full writing team pipeline (research → draft → edit → fact-check → de-slop) with a dedicated de-slopping agent that strips AI-generated filler, clichés, and hedging language
 
 ## Development Commands
 
 - **Run a workflow**: `python main.py --flow dev_workflow --request "Build a Python API for task management"`
 - **Run a thought piece**: `python main.py --flow thought_piece_workflow --project my-essay --phase vision --request "Write about X"`
+- **Run the writing team**: `python main.py --flow writing_team_workflow --request "Write a blog post about why LLMs hallucinate"`
 - **List available flows**: `python main.py --list-flows`
 - **List available Ollama models**: `python main.py --list-models`
 - **Run with quiet mode**: `python main.py --flow dev_workflow --request "Build a calculator" --quiet`
 - **Save output to file**: `python main.py --flow dev_workflow --request "Create a login system" --output results.md`
 - **Disable vector context**: `python main.py --flow blog_workflow_with_context --request "Quick post" --no-vector-context`
-- **Set vector database**: `python main.py --vector-db-type pinecone`
+- **Set vector database**: `python main.py --vector-db-type chroma`
 - **Run tests**: `python -m pytest tests/ -v`
 
 ## Configuration
 
 The system uses environment variables defined in `.env`:
 - `OLLAMA_HOST`: URL of the Ollama server (default: `http://localhost:11434`)
-- `OLLAMA_MODEL_MAP`: Mapping of model aliases to Ollama model names (e.g., `REASONING_MODEL=llama3.1:8b`)
-- `REQUEST_TIMEOUT`: Timeout for API requests (default: 120 seconds)
+- `*_MODEL` (e.g. `REASONING_MODEL`, `CODING_MODEL`): Any env var ending in `_MODEL` is loaded as a model alias. Workflows reference aliases like `REASONING_MODEL` and the client resolves them to actual Ollama model names at runtime.
+- `REQUEST_TIMEOUT`: Timeout for API requests in seconds (default: 120)
 - `CHROMA_PERSIST_DIR`: Local directory for persisting Chroma embeddings (default: `./data/chroma_db`)
-- `PINECONE_API_KEY`: API key for Pinecone if using that backend, etc.
+- `EMBEDDING_MODEL`: Sentence-transformer model for embeddings (default: `all-MiniLM-L6-v2`)
+- `PINECONE_API_KEY`: API key for Pinecone if using that backend
+- `QDRANT_URL`: Qdrant server host (default: `localhost`)
+- `QDRANT_PORT`: Qdrant server port (default: `6333`)
 
 ## Extending the System
 
 Adding new agents:
 1. Create a new system prompt in `prompts/` (e.g., `researcher.txt`)
-2. Add a new workflow step that references this agent
+2. Add a new workflow step that references this agent by filename (without `.txt`)
 
 Adding new workflows:
 1. Create a new YAML file in `config/flows/`
@@ -104,9 +114,12 @@ Adding new step types:
 
 - `main.py`: Entry point and CLI argument handling
 - `core/flow_engine.py`: Workflow execution logic (agent, file_read, file_write, status_update, vector_embed steps)
-- `core/ollama_client.py`: Ollama API interaction
-- `core/context_manager.py`: Vector database integration
-- `agents/base.py`: Base agent class
+- `core/ollama_client.py`: Ollama API interaction and model alias resolution
+- `core/context_manager.py`: Vector database integration and `ContextStrategy` class
+- `core/context_strategy.py`: Standalone `ContextStrategy` helpers (duplicated in `context_manager.py`)
+- `agents/base.py`: Base agent class (abstract; agents are defined by prompts, not subclasses)
 - `prompts/*.txt`: System prompts for different agent roles
 - `config/flows/*.yaml`: Workflow definitions
 - `tests/test_step_types.py`: Pytest suite for step types and workflow plumbing
+- `setup_example_collections.py`: Script to populate example ChromaDB collections
+- `quick_start.sh`: Automated environment setup script

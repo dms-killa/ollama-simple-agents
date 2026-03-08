@@ -1,10 +1,12 @@
 import os
+import time
 import yaml
 import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from core.ollama_client import OllamaClient
 from core.context_manager import ContextManager, ContextStrategy
+from core.orchestrator import OrchestratorPrompt, OrchestratorDecision, Decision
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -20,13 +22,14 @@ class FlowEngine:
     """
 
     def __init__(
-        self, 
-        client: OllamaClient, 
+        self,
+        client: OllamaClient,
         flows_dir: str = "config/flows",
         prompts_dir: str = "prompts",
         enable_vector_context: bool = True,
         vector_db_type: str = "chroma",
-        strict_mode: bool = False
+        strict_mode: bool = False,
+        orchestrator_enabled: bool = False,
     ):
         """
         Initialize the flow engine.
@@ -44,6 +47,8 @@ class FlowEngine:
         self.prompts_dir = Path(prompts_dir)
         self.state = {}
         self.strict_mode = strict_mode
+        self.orchestrator_enabled = orchestrator_enabled
+        self.orchestrator_prompt = OrchestratorPrompt()
 
         # Initialize context manager if enabled
         self.context_manager = None
@@ -478,6 +483,154 @@ class FlowEngine:
         for flow_file in self.flows_dir.glob("*.yaml"):
             flows.append(flow_file.stem)
         return flows
+
+    # ====== Orchestrator Support Methods ======
+
+    def _get_completed_steps_summary(
+        self, flow_config: Dict[str, Any], step_index: int
+    ) -> List[Dict[str, Any]]:
+        """Get summary of steps completed before the current index."""
+        return [s for s in flow_config.get("steps", [])[:step_index]]
+
+    def get_orchestrator_decision(
+        self, flow_name: str, current_step_id: str
+    ) -> OrchestratorDecision:
+        """
+        Query the orchestrator agent for a decision on what to do next.
+
+        Args:
+            flow_name: Name of the current workflow
+            current_step_id: ID of the current step being evaluated
+
+        Returns:
+            OrchestratorDecision with CONTINUE, REPEAT, BRANCH, or TERMINATE
+        """
+        completed_steps = self._get_completed_steps_summary(
+            self.load_flow(flow_name), len(self.state)
+        )
+        prompt_text = self.orchestrator_prompt.build_prompt(
+            flow_name=flow_name,
+            current_step_id=current_step_id,
+            user_request=self.state.get("user_request", ""),
+            state=self.state,
+            completed_steps=completed_steps,
+        )
+
+        logger.info(f"🎯 Seeking orchestrator decision for step: {current_step_id}")
+        response = self.client.generate(
+            model="REASONING_MODEL",
+            system_prompt=prompt_text,
+            user_input="",
+        )
+
+        return self.orchestrator_prompt.parse_decision(response)
+
+    def run_flow_with_orchestrator(
+        self,
+        flow_name: str,
+        user_request: str,
+        verbose: bool = True,
+        params: Optional[Dict[str, str]] = None,
+        max_repeats: int = 3,
+    ) -> Dict[str, Any]:
+        """
+        Run a workflow where an orchestrator agent can make decisions.
+
+        The orchestrator can decide to continue, repeat steps, branch to specific
+        steps, or terminate early based on the current state.
+        """
+        self.state = {"user_request": user_request}
+        if params:
+            self.state.update(params)
+
+        flow_config = self.load_flow(flow_name)
+        steps = flow_config.get("steps", [])
+
+        logger.info(f"\n{'#' * 60}")
+        logger.info(f"Starting Flow with Orchestrator: {flow_config.get('name', flow_name)}")
+        logger.info(f"Description: {flow_config.get('description', 'N/A')}")
+        logger.info(f"{'#' * 60}\n")
+
+        repeat_counts: Dict[str, int] = {}
+        step_index = 0
+
+        while step_index < len(steps):
+            step = steps[step_index]
+            step_id = step.get("id", f"step_{step_index}")
+            step_type = step.get("type", "agent")
+
+            logger.info(f"\n{'=' * 60}")
+            logger.info(f"Executing step {step_index + 1}/{len(steps)}: {step.get('name', step_id)}")
+            logger.info(f"Repeat count: {repeat_counts.get(step_id, 0)}/{max_repeats}")
+            logger.info(f"{'=' * 60}\n")
+
+            try:
+                # Execute the step
+                if step_type == "file_read":
+                    result = self._execute_file_read(step)
+                elif step_type == "file_write":
+                    result = self._execute_file_write(step)
+                elif step_type == "status_update":
+                    result = self._execute_status_update(step)
+                elif step_type == "vector_embed":
+                    result = self._execute_vector_embed(step)
+                else:
+                    result = self._execute_agent_step(step)
+
+                if verbose:
+                    output_key = step.get("output_key", step_id)
+                    logger.info(f"\n{'-' * 40}")
+                    logger.info(f"Output ({output_key}):")
+                    logger.info(f"{'-' * 40}")
+                    preview = result[:500] + "..." if len(result) > 500 else result
+                    logger.info(preview)
+
+                repeat_counts[step_id] = 0
+
+                # Get orchestrator decision
+                decision = self.get_orchestrator_decision(flow_name, step_id)
+                logger.info(f"🎯 Decision: {decision.decision.value} - {decision.reason}")
+
+                if decision.decision == Decision.TERMINATE:
+                    logger.info("Orchestrator terminated the flow early.")
+                    break
+                elif decision.decision == Decision.REPEAT:
+                    repeat_counts[step_id] = repeat_counts.get(step_id, 0) + 1
+                    if repeat_counts[step_id] >= max_repeats:
+                        logger.warning(f"Step {step_id} exceeded max repeats")
+                        step_index += 1
+                    else:
+                        logger.info(f"Repeating step: {step_id}")
+                        continue
+                elif decision.decision == Decision.BRANCH and decision.target_id:
+                    target_index = next(
+                        (i for i, s in enumerate(steps) if s.get("id") == decision.target_id),
+                        None,
+                    )
+                    if target_index is not None:
+                        logger.info(f"Branching to: {decision.target_id}")
+                        step_index = target_index
+                    else:
+                        logger.warning(f"Unknown branch target: {decision.target_id}")
+                        step_index += 1
+                else:
+                    step_index += 1
+
+            except Exception as e:
+                logger.error(f"ERROR in step {step.get('name', step_id)}: {e}")
+                repeat_counts[step_id] = repeat_counts.get(step_id, 0) + 1
+                if repeat_counts[step_id] >= max_repeats:
+                    logger.error(f"Step {step_id} failed too many times")
+                    break
+                if self.strict_mode:
+                    raise
+
+        logger.info(f"\n{'#' * 60}")
+        logger.info("Flow Complete!")
+        logger.info(f"State keys: {list(self.state.keys())}")
+        logger.info(f"{'#' * 60}\n")
+
+        return self.state
 
     def get_context_manager(self) -> Optional[ContextManager]:
         """

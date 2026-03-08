@@ -95,7 +95,14 @@ Examples:
         choices=['chroma', 'pinecone', 'qdrant'],
         help='Vector database type (default: chroma)'
     )
-    
+
+    # Orchestrator options - enables intelligent flow control
+    parser.add_argument(
+        '--orchestrator',
+        action='store_true',
+        help='Enable an orchestrator agent to decide when to repeat, branch, or terminate early'
+    )
+
     args = parser.parse_args()
     
     # Initialize Ollama client
@@ -124,7 +131,8 @@ Examples:
     engine = FlowEngine(
         client=client,
         enable_vector_context=enable_vector,
-        vector_db_type=args.vector_db_type
+        vector_db_type=args.vector_db_type,
+        orchestrator_enabled=args.orchestrator,
     )
     
     # Handle list-flows command
@@ -143,23 +151,31 @@ Examples:
         print("\nError: Both --flow and --request are required for workflow execution")
         return 1
     
-    # Execute workflow
+    # Execute workflow - use orchestrator mode if enabled
     try:
         verbose = not args.quiet
 
         # Build extra parameters for template resolution
         params = {}
         if args.project:
-            params['project'] = args.project
+            params["project"] = args.project
         if args.phase:
-            params['phase'] = args.phase
+            params["phase"] = args.phase
 
-        state = engine.run_flow(
-            flow_name=args.flow,
-            user_request=args.request,
-            verbose=verbose,
-            params=params,
-        )
+        if engine.orchestrator_enabled:
+            state = engine.run_flow_with_orchestrator(
+                flow_name=args.flow,
+                user_request=args.request,
+                verbose=verbose,
+                params=params,
+            )
+        else:
+            state = engine.run_flow(
+                flow_name=args.flow,
+                user_request=args.request,
+                verbose=verbose,
+                params=params,
+            )
         
         # Determine final output key (usually from last step)
         final_key = None
